@@ -1,0 +1,125 @@
+import fs from "node:fs";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
+const globalForDb = globalThis as unknown as { hisaabDb?: DatabaseSync };
+
+function schemaSql(): string {
+  return fs.readFileSync(path.join(process.cwd(), "src/lib/schema.sql"), "utf8");
+}
+
+export function getDb(): DatabaseSync {
+  if (globalForDb.hisaabDb) return globalForDb.hisaabDb;
+  const file = process.env.HISAAB_DB || path.join(process.cwd(), "data", "hisaab.db");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA foreign_keys = ON;");
+  db.exec("PRAGMA busy_timeout = 4000;");
+  db.exec(schemaSql());
+  globalForDb.hisaabDb = db;
+  return db;
+}
+
+export function transaction<T>(fn: () => T): T {
+  const db = getDb();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    throw error;
+  }
+}
+
+export type Merchant = {
+  id: string;
+  business_name: string;
+  mobile: string;
+  upi_vpa: string;
+  gstin: string | null;
+  address: string | null;
+  webhook_secret: string;
+  printer_width: string;
+  created_at: string;
+};
+
+export type Item = {
+  id: string;
+  name: string;
+  sku: string | null;
+  barcode: string | null;
+  category_id: string | null;
+  category_name?: string | null;
+  unit: string;
+  price_paise: number;
+  gst_rate: number;
+  stock_qty: number;
+  low_stock_qty: number;
+  track_stock: number;
+  active: number;
+  created_at: string;
+};
+
+export type Customer = {
+  id: string;
+  name: string;
+  mobile: string | null;
+  balance_paise: number;
+  created_at: string;
+};
+
+export type Invoice = {
+  id: string;
+  client_id: string | null;
+  seq: number;
+  number: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  status: string;
+  payment_mode: string;
+  gst_mode: string;
+  subtotal_paise: number;
+  discount_paise: number;
+  tax_paise: number;
+  total_paise: number;
+  bill_discount_percent: number;
+  notes: string | null;
+  upi_uri: string | null;
+  utr: string | null;
+  payment_source: string | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
+export type InvoiceLine = {
+  id: string;
+  invoice_id: string;
+  item_id: string | null;
+  name: string;
+  unit: string | null;
+  qty: number;
+  unit_price_paise: number;
+  discount_percent: number;
+  discount_paise: number;
+  gst_rate: number;
+  tax_paise: number;
+  cgst_paise: number;
+  sgst_paise: number;
+  line_total_paise: number;
+  note: string | null;
+};
+
+export function one<T>(sql: string, ...params: Array<string | number | null>): T | undefined {
+  return getDb().prepare(sql).get(...params) as T | undefined;
+}
+
+export function many<T>(sql: string, ...params: Array<string | number | null>): T[] {
+  return getDb().prepare(sql).all(...params) as unknown as T[];
+}
