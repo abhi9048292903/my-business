@@ -21,6 +21,10 @@ export async function POST(request: Request) {
       gstRate?: number;
       stockQty?: number;
       lowStockQty?: number;
+      trackStock?: number;
+      itemType?: "product" | "service";
+      skills?: string;
+      serviceType?: string;
     }>(request);
     if (!body.name?.trim()) return jsonError("Item name is required");
     const item = createItem({
@@ -32,6 +36,10 @@ export async function POST(request: Request) {
       gstRate: Number(body.gstRate) || 0,
       stockQty: Number(body.stockQty) || 0,
       lowStockQty: Number(body.lowStockQty ?? 5),
+      trackStock: body.trackStock,
+      itemType: body.itemType,
+      skills: body.skills,
+      serviceType: body.serviceType,
     });
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {

@@ -20,6 +20,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
       gstRate?: number;
       stockQty?: number;
       lowStockQty?: number;
+      trackStock?: number;
+      itemType?: "product" | "service";
+      skills?: string | null;
+      serviceType?: string | null;
     }>(request);
     if (!body.name?.trim()) return jsonError("Item name is required");
     const item = updateItem(id, {
@@ -31,6 +35,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
       gstRate: Number(body.gstRate) || 0,
       stockQty: Number(body.stockQty) || 0,
       lowStockQty: Number(body.lowStockQty ?? 5),
+      trackStock: body.trackStock,
+      itemType: body.itemType,
+      skills: body.skills,
+      serviceType: body.serviceType,
     });
     return NextResponse.json({ item });
   } catch (error) {

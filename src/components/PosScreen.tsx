@@ -68,6 +68,9 @@ export function PosScreen() {
   const [customOpen, setCustomOpen] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customPrice, setCustomPrice] = useState("");
+  const [customUnit, setCustomUnit] = useState("hr");
+  const [customGstRate, setCustomGstRate] = useState(18);
+  const [typeFilter, setTypeFilter] = useState<"ALL" | "SERVICES" | "PRODUCTS">("ALL");
   const searchRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -107,11 +110,15 @@ export function PosScreen() {
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((item) => {
+      const isService = item.item_type === "service";
+      if (typeFilter === "SERVICES" && !isService) return false;
+      if (typeFilter === "PRODUCTS" && isService) return false;
+
       const categoryOk = categoryId === "all" || item.category_id === categoryId;
-      const text = `${item.name} ${item.barcode || ""}`.toLowerCase();
+      const text = `${item.name} ${item.barcode || ""} ${item.skills || ""} ${item.service_type || ""}`.toLowerCase();
       return categoryOk && (!q || text.includes(q));
     });
-  }, [items, query, categoryId]);
+  }, [items, query, categoryId, typeFilter]);
 
   const priced = useMemo(
     () => priceBill(cart, { gstMode, billDiscountPercent: billDiscount }),
@@ -380,27 +387,53 @@ export function PosScreen() {
             <HeaderButton variant="primary" icon={<IconMic />} onClick={() => setVoiceOpen(true)} aria-label="Voice bill">Mic</HeaderButton>
           </HeaderActions>
         </div>
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          <button type="button" className="pill" aria-pressed={categoryId === "all"} onClick={() => setCategoryId("all")}>All</button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" className="pill text-xs" aria-pressed={typeFilter === "ALL"} onClick={() => setTypeFilter("ALL")}>All</button>
+          <button type="button" className="pill text-xs" aria-pressed={typeFilter === "SERVICES"} onClick={() => setTypeFilter("SERVICES")}>Services</button>
+          <button type="button" className="pill text-xs" aria-pressed={typeFilter === "PRODUCTS"} onClick={() => setTypeFilter("PRODUCTS")}>Products</button>
+        </div>
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+          <button type="button" className="pill text-xs" aria-pressed={categoryId === "all"} onClick={() => setCategoryId("all")}>All Categories</button>
           {categories.map((category) => (
-            <button key={category.id} type="button" className="pill" aria-pressed={categoryId === category.id} onClick={() => setCategoryId(category.id)}>
+            <button key={category.id} type="button" className="pill text-xs" aria-pressed={categoryId === category.id} onClick={() => setCategoryId(category.id)}>
               {category.name}
             </button>
           ))}
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {visible.map((item) => (
-            <button key={item.id} type="button" onClick={() => addItem(item)} className="surface min-h-[92px] p-3 text-left">
-              <span className="block font-semibold leading-tight">{item.name}</span>
-              <span className="mt-2 flex items-end justify-between gap-2">
-                <span className="font-display text-2xl leading-none">{formatINR(item.price_paise)}</span>
-                <span className="text-xs font-bold muted">/{item.unit}</span>
-              </span>
-              <span className={`mt-1 block text-xs font-bold ${item.stock_qty <= item.low_stock_qty ? "text-[var(--warn)]" : "muted"}`}>
-                {qtyText(item.stock_qty)} in stock
-              </span>
-            </button>
-          ))}
+          {visible.map((item) => {
+            const isService = item.item_type === "service";
+            return (
+              <button key={item.id} type="button" onClick={() => addItem(item)} className="surface min-h-[92px] p-3 text-left transition-colors hover:border-[var(--ink)]">
+                <div className="flex items-start justify-between gap-1">
+                  <span className="block font-semibold leading-tight">{item.name}</span>
+                  {isService ? (
+                    <span className="rounded-full bg-blue-100 dark:bg-blue-950 px-1.5 py-0.5 text-[9px] font-bold text-blue-700 dark:text-blue-300 shrink-0">
+                      {item.service_type === "staffing" ? "HR" : item.service_type === "freelance" ? "Freelance" : "Service"}
+                    </span>
+                  ) : null}
+                </div>
+                {item.skills ? (
+                  <span className="mt-1 block text-[10px] text-blue-600 dark:text-blue-400 line-clamp-1">
+                    {item.skills}
+                  </span>
+                ) : null}
+                <span className="mt-2 flex items-end justify-between gap-2">
+                  <span className="font-display text-2xl leading-none">{formatINR(item.price_paise)}</span>
+                  <span className="text-xs font-bold muted">/{item.unit}</span>
+                </span>
+                <span className="mt-1 block text-xs font-bold">
+                  {isService ? (
+                    <span className="text-blue-500 text-[11px]">Billable service</span>
+                  ) : (
+                    <span className={item.stock_qty <= item.low_stock_qty ? "text-[var(--warn)]" : "muted"}>
+                      {qtyText(item.stock_qty)} in stock
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -479,7 +512,7 @@ export function PosScreen() {
                 <HeaderButton icon={<IconClose />} onClick={() => setVoiceOpen(false)}>Close</HeaderButton>
               </HeaderActions>
             </div>
-            <p className="text-sm muted">Try “2 kg sugar and 1 L milk, 5% discount”.</p>
+            <p className="text-sm muted">Try “20 hrs web development and 1 month devops specialist” or “2 kg sugar, 5% discount”.</p>
             <button type="button" className="btn btn-primary" onClick={listen}>Listen</button>
             <textarea className="field min-h-24 py-3" value={voiceText} onChange={(event) => setVoiceText(event.target.value)} aria-label="Voice transcript" />
             <button className="btn btn-warm" type="submit">Add to bill</button>
@@ -496,7 +529,16 @@ export function PosScreen() {
             if (!customName.trim() || !(price > 0)) return;
             setCart((current) => [
               ...current,
-              { key: crypto.randomUUID(), name: customName.trim(), unit: "pcs", qty: 1, unitPricePaise: price, discountPercent: 0, gstRate: 0, note: "" },
+              {
+                key: crypto.randomUUID(),
+                name: customName.trim(),
+                unit: customUnit,
+                qty: 1,
+                unitPricePaise: price,
+                discountPercent: 0,
+                gstRate: customGstRate,
+                note: "",
+              },
             ]);
             setCustomName("");
             setCustomPrice("");
@@ -506,14 +548,32 @@ export function PosScreen() {
         >
           <div className="surface grid gap-3 p-4">
             <div className="flex items-center justify-between gap-3">
-              <p className="font-semibold">Custom item</p>
+              <p className="font-semibold">Custom Item or Service</p>
               <HeaderActions>
                 <HeaderButton icon={<IconClose />} onClick={() => setCustomOpen(false)}>Close</HeaderButton>
               </HeaderActions>
             </div>
-            <input className="field" placeholder="Name" value={customName} onChange={(event) => setCustomName(event.target.value)} required />
-            <input className="field" placeholder="Price" inputMode="decimal" value={customPrice} onChange={(event) => setCustomPrice(event.target.value)} required />
-            <button className="btn btn-primary" type="submit">Add</button>
+            <input className="field" placeholder="Name (e.g. Freelance Consulting or Emergency Contractor)" value={customName} onChange={(event) => setCustomName(event.target.value)} required />
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs font-semibold">
+                Unit
+                <select className="field mt-1" value={customUnit} onChange={(event) => setCustomUnit(event.target.value)}>
+                  {["hr", "day", "month", "project", "resource", "person", "shift", "pcs", "kg", "pack"].map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold">
+                GST %
+                <select className="field mt-1" value={customGstRate} onChange={(event) => setCustomGstRate(Number(event.target.value))}>
+                  {[0, 5, 12, 18, 28].map((rate) => (
+                    <option key={rate} value={rate}>GST {rate}%</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <input className="field" placeholder="Price (₹)" inputMode="decimal" value={customPrice} onChange={(event) => setCustomPrice(event.target.value)} required />
+            <button className="btn btn-primary" type="submit">Add to bill</button>
           </div>
         </form>
       ) : null}

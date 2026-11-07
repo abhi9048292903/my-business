@@ -12,7 +12,7 @@ import {
 } from "./db";
 import { startOfTodayISO } from "./money";
 import { priceBill, type CartInputLine, type GstMode } from "./pricing";
-import { SEED_CATEGORIES, SEED_ITEMS, seedPrice } from "./seed";
+import { getCatalogPreset, seedPrice } from "./seed";
 import { parseUpiSms } from "./sms";
 import { buildUpiUri } from "./upi";
 import { publishInvoice } from "./realtime";
@@ -29,10 +29,12 @@ export function createMerchant(input: {
   upiVpa: string;
   gstin?: string;
   address?: string;
+  businessType?: string;
   sampleCatalog?: boolean;
 }): Merchant {
   if (getMerchant()) throw new Error("This device already has a shop profile");
   const now = new Date().toISOString();
+  const businessType = input.businessType?.trim() || "retail";
   const merchant: Merchant = {
     id: randomUUID(),
     business_name: input.businessName.trim(),
@@ -42,14 +44,15 @@ export function createMerchant(input: {
     address: input.address?.trim() || null,
     webhook_secret: randomBytes(16).toString("hex"),
     printer_width: "58",
+    business_type: businessType,
     created_at: now,
   };
 
   transaction(() => {
     getDb()
       .prepare(
-        `INSERT INTO merchant (id, business_name, mobile, upi_vpa, gstin, address, webhook_secret, printer_width, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO merchant (id, business_name, mobile, upi_vpa, gstin, address, webhook_secret, printer_width, business_type, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         merchant.id,
@@ -60,51 +63,96 @@ export function createMerchant(input: {
         merchant.address,
         merchant.webhook_secret,
         merchant.printer_width,
+        merchant.business_type,
         merchant.created_at,
       );
 
     if (input.sampleCatalog !== false) {
-      const insertCategory = getDb().prepare("INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?)");
-      for (const category of SEED_CATEGORIES) insertCategory.run(category.id, category.name, category.sort_order);
-      const insertItem = getDb().prepare(
-        `INSERT INTO items (id, name, sku, barcode, category_id, unit, price_paise, gst_rate, stock_qty, low_stock_qty, track_stock, active, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)`,
-      );
-      for (const item of SEED_ITEMS) {
-        insertItem.run(
-          item.id,
-          item.name,
-          item.barcode.slice(-4),
-          item.barcode,
-          item.categoryId,
-          item.unit,
-          seedPrice(item.price),
-          item.gst,
-          item.stock,
-          item.low,
-          now,
-        );
-      }
+      applyCatalogPreset(businessType, "replace");
+
       const ramesh = randomUUID();
       const sunita = randomUUID();
       const insertCustomer = getDb().prepare(
         "INSERT INTO customers (id, name, mobile, balance_paise, created_at) VALUES (?, ?, ?, ?, ?)",
       );
-      insertCustomer.run(ramesh, "Ramesh Kumar", "9845011122", 0, now);
-      insertCustomer.run(sunita, "Sunita Devi", "9845033344", 25000, now);
-      getDb()
-        .prepare(
-          `INSERT INTO ledger_entries (id, customer_id, invoice_id, amount_paise, entry_type, note, created_at)
-           VALUES (?, ?, NULL, ?, 'OPENING', ?, ?)`,
-        )
-        .run(randomUUID(), sunita, 25000, "Opening udhar", now);
+      if (businessType === "freelance" || businessType === "staffing") {
+        insertCustomer.run(ramesh, "Acme Tech Ventures", "9845011122", 0, now);
+        insertCustomer.run(sunita, "Nova Cloud Solutions", "9845033344", 5000000, now);
+        getDb()
+          .prepare(
+            `INSERT INTO ledger_entries (id, customer_id, invoice_id, amount_paise, entry_type, note, created_at)
+             VALUES (?, ?, NULL, ?, 'OPENING', ?, ?)`,
+          )
+          .run(randomUUID(), sunita, 5000000, "Opening balance (retainer invoice)", now);
+      } else {
+        insertCustomer.run(ramesh, "Ramesh Kumar", "9845011122", 0, now);
+        insertCustomer.run(sunita, "Sunita Devi", "9845033344", 25000, now);
+        getDb()
+          .prepare(
+            `INSERT INTO ledger_entries (id, customer_id, invoice_id, amount_paise, entry_type, note, created_at)
+             VALUES (?, ?, NULL, ?, 'OPENING', ?, ?)`,
+          )
+          .run(randomUUID(), sunita, 25000, "Opening udhar", now);
+      }
     }
   });
 
   return merchant;
 }
 
-export function updateMerchant(patch: Partial<Pick<Merchant, "business_name" | "mobile" | "upi_vpa" | "gstin" | "address" | "printer_width">>): Merchant {
+export function applyCatalogPreset(businessType: string, mode: "replace" | "append" = "replace"): { itemsCount: number; categoriesCount: number } {
+  const { categories, items } = getCatalogPreset(businessType);
+  const now = new Date().toISOString();
+
+  return transaction(() => {
+    if (mode === "replace") {
+      getDb().exec("DELETE FROM items");
+      getDb().exec("DELETE FROM categories");
+    }
+
+    const insertCategory = getDb().prepare(
+      "INSERT OR IGNORE INTO categories (id, name, sort_order) VALUES (?, ?, ?)",
+    );
+    for (const category of categories) {
+      insertCategory.run(category.id, category.name, category.sort_order);
+    }
+
+    const insertItem = getDb().prepare(
+      `INSERT OR REPLACE INTO items (
+        id, name, sku, barcode, category_id, unit, price_paise, gst_rate,
+        stock_qty, low_stock_qty, track_stock, item_type, skills, service_type, active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+    );
+
+    for (const item of items) {
+      const isService = item.itemType === "service";
+      const trackStock = isService ? 0 : (item.trackStock ?? 1);
+      const stockQty = isService ? 0 : (item.stock ?? 0);
+      const lowStockQty = isService ? 0 : (item.low ?? 0);
+      insertItem.run(
+        item.id,
+        item.name,
+        item.barcode ? item.barcode.slice(-4) : null,
+        item.barcode || null,
+        item.categoryId,
+        item.unit,
+        seedPrice(item.price),
+        item.gst,
+        stockQty,
+        lowStockQty,
+        trackStock,
+        item.itemType || "product",
+        item.skills || null,
+        item.serviceType || null,
+        now,
+      );
+    }
+
+    return { itemsCount: items.length, categoriesCount: categories.length };
+  });
+}
+
+export function updateMerchant(patch: Partial<Pick<Merchant, "business_name" | "mobile" | "upi_vpa" | "gstin" | "address" | "printer_width" | "business_type">>): Merchant {
   const current = getMerchant();
   if (!current) throw new Error("Set up the shop first");
   const next = {
@@ -113,9 +161,9 @@ export function updateMerchant(patch: Partial<Pick<Merchant, "business_name" | "
   };
   getDb()
     .prepare(
-      `UPDATE merchant SET business_name = ?, mobile = ?, upi_vpa = ?, gstin = ?, address = ?, printer_width = ? WHERE id = ?`,
+      `UPDATE merchant SET business_name = ?, mobile = ?, upi_vpa = ?, gstin = ?, address = ?, printer_width = ?, business_type = ? WHERE id = ?`,
     )
-    .run(next.business_name, next.mobile, next.upi_vpa, next.gstin, next.address, next.printer_width, current.id);
+    .run(next.business_name, next.mobile, next.upi_vpa, next.gstin, next.address, next.printer_width, next.business_type || "retail", current.id);
   return getMerchant() as Merchant;
 }
 
@@ -140,15 +188,25 @@ export function createItem(input: {
   unit: string;
   pricePaise: number;
   gstRate: number;
-  stockQty: number;
-  lowStockQty: number;
+  stockQty?: number;
+  lowStockQty?: number;
+  trackStock?: number;
+  itemType?: "product" | "service";
+  skills?: string;
+  serviceType?: string;
 }): Item {
   const id = randomUUID();
   const now = new Date().toISOString();
+  const itemType = input.itemType || "product";
+  const isService = itemType === "service";
+  const trackStock = isService ? 0 : (input.trackStock ?? 1);
+  const stockQty = isService ? 0 : (input.stockQty || 0);
+  const lowStockQty = isService ? 0 : (input.lowStockQty ?? 5);
+
   getDb()
     .prepare(
-      `INSERT INTO items (id, name, sku, barcode, category_id, unit, price_paise, gst_rate, stock_qty, low_stock_qty, track_stock, active, created_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)`,
+      `INSERT INTO items (id, name, sku, barcode, category_id, unit, price_paise, gst_rate, stock_qty, low_stock_qty, track_stock, item_type, skills, service_type, active, created_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
     )
     .run(
       id,
@@ -158,8 +216,12 @@ export function createItem(input: {
       input.unit,
       Math.round(input.pricePaise),
       input.gstRate,
-      input.stockQty,
-      input.lowStockQty,
+      stockQty,
+      lowStockQty,
+      trackStock,
+      itemType,
+      input.skills?.trim() || null,
+      input.serviceType?.trim() || null,
       now,
     );
   return one<Item>("SELECT items.*, categories.name AS category_name FROM items LEFT JOIN categories ON categories.id = items.category_id WHERE items.id = ?", id) as Item;
@@ -172,15 +234,25 @@ export function updateItem(id: string, input: {
   unit: string;
   pricePaise: number;
   gstRate: number;
-  lowStockQty: number;
-  stockQty: number;
+  lowStockQty?: number;
+  stockQty?: number;
+  trackStock?: number;
+  itemType?: "product" | "service";
+  skills?: string | null;
+  serviceType?: string | null;
 }) {
   const existing = one<Item>("SELECT * FROM items WHERE id = ? AND active = 1", id);
   if (!existing) throw new Error("Item not found");
+  const itemType = input.itemType || existing.item_type || "product";
+  const isService = itemType === "service";
+  const trackStock = isService ? 0 : (input.trackStock ?? existing.track_stock ?? 1);
+  const stockQty = isService ? 0 : (input.stockQty ?? existing.stock_qty);
+  const lowStockQty = isService ? 0 : (input.lowStockQty ?? existing.low_stock_qty);
+
   transaction(() => {
     getDb()
       .prepare(
-        `UPDATE items SET name = ?, barcode = ?, category_id = ?, unit = ?, price_paise = ?, gst_rate = ?, low_stock_qty = ?, stock_qty = ? WHERE id = ?`,
+        `UPDATE items SET name = ?, barcode = ?, category_id = ?, unit = ?, price_paise = ?, gst_rate = ?, low_stock_qty = ?, stock_qty = ?, track_stock = ?, item_type = ?, skills = ?, service_type = ? WHERE id = ?`,
       )
       .run(
         input.name.trim(),
@@ -189,17 +261,23 @@ export function updateItem(id: string, input: {
         input.unit,
         Math.round(input.pricePaise),
         input.gstRate,
-        input.lowStockQty,
-        input.stockQty,
+        lowStockQty,
+        stockQty,
+        trackStock,
+        itemType,
+        input.skills !== undefined ? (input.skills?.trim() || null) : (existing.skills || null),
+        input.serviceType !== undefined ? (input.serviceType?.trim() || null) : (existing.service_type || null),
         id,
       );
-    const delta = input.stockQty - existing.stock_qty;
-    if (Math.abs(delta) > 0.0001) {
-      getDb()
-        .prepare(
-          `INSERT INTO stock_movements (id, item_id, qty_delta, reason, ref_type, ref_id, created_at) VALUES (?, ?, ?, 'ADJUST', 'item', ?, ?)`,
-        )
-        .run(randomUUID(), id, delta, id, new Date().toISOString());
+    if (trackStock === 1) {
+      const delta = stockQty - existing.stock_qty;
+      if (Math.abs(delta) > 0.0001) {
+        getDb()
+          .prepare(
+            `INSERT INTO stock_movements (id, item_id, qty_delta, reason, ref_type, ref_id, created_at) VALUES (?, ?, ?, 'ADJUST', 'item', ?, ?)`,
+          )
+          .run(randomUUID(), id, delta, id, new Date().toISOString());
+      }
     }
   });
   return one<Item>("SELECT items.*, categories.name AS category_name FROM items LEFT JOIN categories ON categories.id = items.category_id WHERE items.id = ?", id) as Item;
@@ -350,8 +428,11 @@ export function createInvoice(input: CreateInvoiceInput): InvoiceDetail {
         line.note || null,
       );
       if (line.itemId) {
-        decrement.run(line.qty, line.itemId);
-        moveStock.run(randomUUID(), line.itemId, -line.qty, id, now);
+        const item = one<Item>("SELECT * FROM items WHERE id = ?", line.itemId);
+        if (item && item.track_stock === 1) {
+          decrement.run(line.qty, line.itemId);
+          moveStock.run(randomUUID(), line.itemId, -line.qty, id, now);
+        }
       }
     }
 
@@ -473,8 +554,11 @@ export function cancelInvoice(id: string): InvoiceDetail {
     );
     for (const line of invoice.lines) {
       if (!line.item_id) continue;
-      restock.run(line.qty, line.item_id);
-      movement.run(randomUUID(), line.item_id, line.qty, id, now);
+      const item = one<Item>("SELECT * FROM items WHERE id = ?", line.item_id);
+      if (item && item.track_stock === 1) {
+        restock.run(line.qty, line.item_id);
+        movement.run(randomUUID(), line.item_id, line.qty, id, now);
+      }
     }
     if (invoice.payment_mode === "CREDIT" && invoice.customer_id) {
       getDb()

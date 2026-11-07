@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS merchant (
   address TEXT,
   webhook_secret TEXT NOT NULL,
   printer_width TEXT NOT NULL DEFAULT '58',
+  business_type TEXT NOT NULL DEFAULT 'retail',
   created_at TEXT NOT NULL
 );
 
@@ -30,6 +31,9 @@ CREATE TABLE IF NOT EXISTS items (
   stock_qty REAL NOT NULL DEFAULT 0,
   low_stock_qty REAL NOT NULL DEFAULT 5,
   track_stock INTEGER NOT NULL DEFAULT 1,
+  item_type TEXT NOT NULL DEFAULT 'product',
+  skills TEXT,
+  service_type TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );

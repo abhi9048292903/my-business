@@ -1,6 +1,6 @@
 # Hisaab
 
-Mobile-first billing till for a kirana, a service counter, or a small wholesaler. A bill is a few taps. The UPI QR is locked to that exact total. Stock and khata update with the bill, including while the shop is offline.
+Mobile-first billing till and amount-locked UPI POS for small businesses, freelancers, agencies, and retail counters. Bill in seconds with locked UPI QR totals, offline khata ledgers, and support for physical inventory, freelance contracts, and human resource staffing placements.
 
 ## Run
 
@@ -10,59 +10,61 @@ npm test
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The first screen asks for the shop name, mobile, UPI ID, and optional GSTIN. Leave “sample grocery catalog” on.
+Open [http://localhost:3000](http://localhost:3000). The first screen asks for your business type (Freelance, Human Resources & Staffing, Retail, or Hybrid), name, mobile, UPI ID, and optional GSTIN.
 
-Try a bill: tap Sugar and Milk, then **Show QR**. **Confirm UPI received** runs the same webhook a bank would call, and the till speaks the amount. Barcode `8901001000011` is Sugar. Voice text `2 kg sugar and 1 L milk, 5% discount` fills the cart.
+### Business Types & Services
+- **Freelance & Consulting**: Hourly (`hr`), daily (`day`), and fixed-project (`project`) deliverables for web development, UI/UX design, cloud architecture, and marketing.
+- **Human Resources & Staffing**: Placement and contract billing for specialized human resources (e.g. Senior Frontend Engineer, DevOps Specialist, Certified Electricians, Data Technicians) billed per `month`, `day`, `shift`, or `resource`, with dedicated skill tagging.
+- **Retail & Store**: Physical goods with barcode scanner, stock counts, and low-stock alerts.
+- **Hybrid**: Mix of services and physical products.
 
 ## Layout
 
 ```
 src/app/                  screens and API routes
-src/app/api/              merchant, items, invoices, webhooks, khata, purchases, sync
-src/components/           till, payment sheet, stock, khata, settings
+src/app/api/              merchant, items, catalog presets, invoices, webhooks, khata, purchases, sync
+src/components/           till, payment sheet, catalog & services, khata, settings
 src/lib/schema.sql        SQLite schema
-src/lib/billing.ts        invoices, stock, ledger, reconciliation
+src/lib/billing.ts        invoices, stock, services, ledger, reconciliation
 src/lib/pricing.ts        inclusive GST, line and bill discounts
+src/lib/seed.ts           pre-seeded catalogs for freelance, staffing/HR, and retail
 src/lib/offline (client)  IndexedDB outbox
 data/hisaab.db            created on first run
 ```
 
-The phone is a PWA (React, Next.js). The till talks to Route Handlers on the same origin. Those handlers use Node’s built-in SQLite. An in-process listener pushes payment status to the open QR screen; a bank can later point at the same webhook. Redis is not required for one counter. The listener is the piece you would swap for Redis pub/sub if several terminals share one server.
-
 ## Money
 
-Amounts are integer paise. Selling prices are tax-inclusive. In GST mode the till pulls CGST and SGST out of the line (half each, intra-state). Non-GST mode charges the same shelf price with no tax breakup.
+Amounts are integer paise. Selling prices are tax-inclusive. In GST mode the till pulls CGST and SGST out of the line (half each, intra-state). Non-GST mode charges the same shelf price with no tax breakup. Services automatically default to standard 18% GST with unmanaged inventory (`track_stock = 0`).
 
 ## Data
 
 | Table | Holds |
 | --- | --- |
-| `merchant` | Shop name, mobile, UPI ID, GSTIN, webhook secret, printer width |
-| `categories`, `items` | Shelf, barcode, GST rate, stock, low-stock line |
-| `customers`, `ledger_entries` | Khata. Positive balance means the customer owes the shop |
+| `merchant` | Shop name, mobile, UPI ID, GSTIN, business type, webhook secret, printer width |
+| `categories`, `items` | Name, barcode, GST rate, stock, item type (`product` / `service`), skills, service type |
+| `customers`, `ledger_entries` | Khata. Positive balance means the customer owes the business |
 | `invoices`, `invoice_lines` | `UNPAID`, `PAID`, `CREDIT`, `CANCELLED` |
-| `stock_movements` | Sale, purchase, cancel, manual count |
+| `stock_movements` | Sale, purchase, cancel, manual count (physical goods only) |
 | `purchases`, `purchase_lines` | Distributor bills after OCR review |
 | `payment_events` | Webhook and SMS attempts |
-
-UPI ID is the shop’s public address. The app does not ask for a UPI PIN or net-banking password. The webhook secret lives in Settings and must be sent as `x-webhook-secret`.
 
 ## API
 
 | Method | Path | Role |
 | --- | --- | --- |
-| `POST` | `/api/merchant` | Create the shop |
-| `GET`, `PATCH` | `/api/merchant` | Read or edit profile and printer width |
-| `GET`, `POST` | `/api/items` | Catalog |
-| `PATCH`, `DELETE` | `/api/items/:id` | Edit or archive |
-| `POST` | `/api/invoices` | Price the cart, cut stock, open UPI / cash / udhar |
+| `POST` | `/api/merchant` | Create business profile with business model type |
+| `GET`, `PATCH` | `/api/merchant` | Read or edit profile, printer width, and business type |
+| `POST` | `/api/catalog/preset` | Load / append service catalogs (freelance, staffing, retail) |
+| `GET`, `POST` | `/api/items` | Catalog (items & services) |
+| `PATCH`, `DELETE` | `/api/items/:id` | Edit or archive item / service |
+| `POST` | `/api/invoices` | Price the cart, cut stock (if product), open UPI / cash / udhar |
 | `GET` | `/api/invoices/:id` | Bill detail |
-| `PATCH` | `/api/invoices/:id` | `{ "action": "cancel" }` restocks and reverses khata |
+| `PATCH` | `/api/invoices/:id` | `{ "action": "cancel" }` restocks (if product) and reverses khata |
 | `GET` | `/api/invoices/:id/pdf` | Thermal-width PDF with QR |
 | `GET` | `/api/invoices/:id/events` | Server-sent payment status |
 | `POST` | `/api/webhooks/upi` | `{ invoiceId, amountPaise, utr }` marks `PAID` only if the amount matches |
 | `POST` | `/api/webhooks/sms` | `{ text }` parses a credit SMS |
-| `POST` | `/api/voice/parse` | Speech transcript to catalog lines |
+| `POST` | `/api/voice/parse` | Speech transcript to catalog lines (supports hrs, days, months, resources) |
 | `POST` | `/api/purchases` | `action: "parse"` or save stock |
 | `POST` | `/api/sync` | Flush offline bills. Totals are recomputed |
 | `GET`, `POST` | `/api/customers` and `/api/customers/:id/ledger` | Khata |

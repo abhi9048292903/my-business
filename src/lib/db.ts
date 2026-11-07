@@ -9,20 +9,51 @@ function schemaSql(): string {
 }
 
 export function getDb(): DatabaseSync {
-  if (globalForDb.hisaabDb) return globalForDb.hisaabDb;
   const file = process.env.HISAAB_DB || path.join(process.cwd(), "data", "hisaab.db");
+  const current = globalForDb as unknown as { hisaabDb?: DatabaseSync; currentFile?: string };
+  if (current.hisaabDb && current.currentFile === file) return current.hisaabDb;
+  if (current.hisaabDb) {
+    try {
+      current.hisaabDb.close();
+    } catch {}
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA busy_timeout = 4000;");
   db.exec(schemaSql());
-  globalForDb.hisaabDb = db;
+  try {
+    db.exec("ALTER TABLE merchant ADD COLUMN business_type TEXT NOT NULL DEFAULT 'retail';");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    db.exec("ALTER TABLE items ADD COLUMN item_type TEXT NOT NULL DEFAULT 'product';");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    db.exec("ALTER TABLE items ADD COLUMN skills TEXT;");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    db.exec("ALTER TABLE items ADD COLUMN service_type TEXT;");
+  } catch {
+    /* column already exists */
+  }
+  current.hisaabDb = db;
+  current.currentFile = file;
   return db;
 }
 
+let inTransaction = false;
+
 export function transaction<T>(fn: () => T): T {
+  if (inTransaction) return fn();
   const db = getDb();
+  inTransaction = true;
   db.exec("BEGIN IMMEDIATE");
   try {
     const result = fn();
@@ -35,6 +66,8 @@ export function transaction<T>(fn: () => T): T {
       /* already rolled back */
     }
     throw error;
+  } finally {
+    inTransaction = false;
   }
 }
 
@@ -47,6 +80,7 @@ export type Merchant = {
   address: string | null;
   webhook_secret: string;
   printer_width: string;
+  business_type: string;
   created_at: string;
 };
 
@@ -63,6 +97,9 @@ export type Item = {
   stock_qty: number;
   low_stock_qty: number;
   track_stock: number;
+  item_type?: "product" | "service";
+  skills?: string | null;
+  service_type?: string | null;
   active: number;
   created_at: string;
 };

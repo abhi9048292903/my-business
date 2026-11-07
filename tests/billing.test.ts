@@ -111,3 +111,96 @@ test("invoice posts stock, udhar, and webhook reconciliation", async () => {
   assert.equal(billing.listCustomers().find((customer) => customer.id === sunita.id)?.balance_paise, 25000);
   assert.equal(merchant.upi_vpa, "shop@okaxis");
 });
+
+test("service items support freelance work and human resources with skills and no stock decrement", async () => {
+  process.env.HISAAB_DB = path.join(mkdtempSync(path.join(tmpdir(), "hisaab-services-")), "t.db");
+  const billing = await import("../src/lib/billing.ts");
+  const merchant = billing.createMerchant({
+    businessName: "TalentForge & Dev Studio",
+    mobile: "9876543210",
+    upiVpa: "talentforge@okaxis",
+    businessType: "staffing",
+    sampleCatalog: true,
+  });
+
+  assert.equal(merchant.business_type, "staffing");
+
+  // Check that staffing preset seeded categories and services
+  const categories = billing.listCategories();
+  assert.ok(categories.some((c) => c.name.includes("Engineering Staffing") || c.name.includes("Talent")));
+
+  const items = billing.listItems();
+  const frontendDev = items.find((i) => i.id === "hr_senior_frontend");
+  assert.ok(frontendDev);
+  assert.equal(frontendDev?.item_type, "service");
+  assert.equal(frontendDev?.unit, "month");
+  assert.equal(frontendDev?.track_stock, 0);
+  assert.ok(frontendDev?.skills?.includes("React"));
+
+  // Create custom freelance service
+  const freelanceWork = billing.createItem({
+    name: "Custom Full-Stack Web Development",
+    unit: "hr",
+    pricePaise: 250000, // ₹2500/hr
+    gstRate: 18,
+    itemType: "service",
+    serviceType: "freelance",
+    skills: "React, Node.js, Next.js, GraphQL",
+  });
+
+  assert.equal(freelanceWork.item_type, "service");
+  assert.equal(freelanceWork.track_stock, 0);
+  assert.equal(freelanceWork.skills, "React, Node.js, Next.js, GraphQL");
+
+  // Bill 40 hours of freelance work and 2 months of HR frontend dev placement
+  const invoice = billing.createInvoice({
+    paymentMode: "UPI",
+    gstMode: "GST",
+    lines: [
+      {
+        itemId: freelanceWork.id,
+        name: freelanceWork.name,
+        qty: 40,
+        unit: freelanceWork.unit,
+        unitPricePaise: freelanceWork.price_paise,
+        gstRate: freelanceWork.gst_rate,
+      },
+      {
+        itemId: frontendDev.id,
+        name: frontendDev.name,
+        qty: 2,
+        unit: frontendDev.unit,
+        unitPricePaise: frontendDev.price_paise,
+        gstRate: frontendDev.gst_rate,
+      },
+    ],
+  });
+
+  assert.equal(invoice.status, "UNPAID");
+  // 40 * 2500 = 100,000 + 2 * 125,000 = 250,000 => total 350,000 rupees => 35,000,000 paise
+  assert.equal(invoice.subtotal_paise, 35000000);
+  assert.equal(invoice.total_paise, 35000000);
+
+  // Verify stock was not touched and remains 0
+  const refreshedWork = billing.listItems().find((i) => i.id === freelanceWork.id);
+  assert.equal(refreshedWork?.stock_qty, 0);
+  const refreshedHR = billing.listItems().find((i) => i.id === frontendDev.id);
+  assert.equal(refreshedHR?.stock_qty, 0);
+
+  // Cancelling does not alter stock
+  billing.cancelInvoice(invoice.id);
+  const afterCancel = billing.listItems().find((i) => i.id === freelanceWork.id);
+  assert.equal(afterCancel?.stock_qty, 0);
+});
+
+test("voice parses service units including hours, days, months, and resources", () => {
+  const parsed = parseVoiceBill("Add 10 hrs web development and 1 month senior devops engineer for acme");
+  assert.equal(parsed.customerQuery, "acme");
+  assert.equal(parsed.lines.length, 2);
+  assert.equal(parsed.lines[0].qty, 10);
+  assert.equal(parsed.lines[0].unit, "hr");
+  assert.equal(parsed.lines[0].query, "web development");
+  assert.equal(parsed.lines[1].qty, 1);
+  assert.equal(parsed.lines[1].unit, "month");
+  assert.equal(parsed.lines[1].query, "senior devops engineer");
+});

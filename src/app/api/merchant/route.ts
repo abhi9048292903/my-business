@@ -20,6 +20,7 @@ export async function POST(request: Request) {
       upiVpa?: string;
       gstin?: string;
       address?: string;
+      businessType?: string;
       sampleCatalog?: boolean;
     }>(request);
     if (!body.businessName?.trim()) return jsonError("Business name is required");
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
       upiVpa: body.upiVpa,
       gstin: body.gstin,
       address: body.address,
+      businessType: body.businessType,
       sampleCatalog: body.sampleCatalog,
     });
     return NextResponse.json({ merchant }, { status: 201 });
@@ -48,6 +50,7 @@ export async function PATCH(request: Request) {
       gstin?: string;
       address?: string;
       printerWidth?: string;
+      businessType?: string;
     }>(request);
     if (body.mobile && !isValidIndianMobile(body.mobile)) return jsonError("Enter a 10-digit mobile number");
     if (body.upiVpa && !isValidVpa(body.upiVpa)) return jsonError("Enter a valid UPI ID");
@@ -61,6 +64,7 @@ export async function PATCH(request: Request) {
       gstin: body.gstin?.trim() || undefined,
       address: body.address?.trim(),
       printer_width: body.printerWidth,
+      business_type: body.businessType?.trim(),
     });
     return NextResponse.json({ merchant });
   } catch (error) {

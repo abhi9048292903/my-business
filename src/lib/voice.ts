@@ -11,8 +11,26 @@ export type VoiceParse = {
   remainder: string;
 };
 
-const UNIT =
-  "kg|kgs|g|gm|grams|gram|ltr|litre|liter|litres|l|ml|pcs|pc|piece|pieces|pack|packet|pkt|dozen";
+const UNIT_TOKENS = [
+  "hours", "hour", "hrs", "hr",
+  "months", "month", "mo",
+  "days", "day",
+  "shifts", "shift",
+  "projects", "project",
+  "resources", "resource",
+  "persons", "person",
+  "devs", "dev",
+  "visits", "visit",
+  "litres", "liters", "litre", "liter", "ltr", "l",
+  "grams", "gram", "gms", "gm", "g",
+  "pieces", "piece", "pcs", "pc",
+  "packets", "packet", "packs", "pack", "pkts", "pkt",
+  "dozens", "dozen",
+  "kgs", "kg",
+  "ml",
+];
+
+const UNIT = UNIT_TOKENS.sort((a, b) => b.length - a.length).join("|");
 
 const UNIT_MAP: Record<string, string> = {
   kg: "kg",
@@ -36,6 +54,27 @@ const UNIT_MAP: Record<string, string> = {
   packet: "pack",
   pkt: "pack",
   dozen: "dozen",
+  hr: "hr",
+  hrs: "hr",
+  hour: "hr",
+  hours: "hr",
+  day: "day",
+  days: "day",
+  month: "month",
+  months: "month",
+  mo: "month",
+  resource: "resource",
+  resources: "resource",
+  person: "person",
+  persons: "person",
+  dev: "resource",
+  devs: "resource",
+  shift: "shift",
+  shifts: "shift",
+  project: "project",
+  projects: "project",
+  visit: "visit",
+  visits: "visit",
 };
 
 export function parseVoiceBill(transcript: string): VoiceParse {

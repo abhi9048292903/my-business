@@ -9,7 +9,7 @@ import { HeaderActions, HeaderButton, HeaderLink, IconSettings, IconSun } from "
 
 const LINKS = [
   { href: "/", label: "Bill" },
-  { href: "/inventory", label: "Stock" },
+  { href: "/inventory", label: "Catalog" },
   { href: "/khata", label: "Khata" },
   { href: "/invoices", label: "Bills" },
 ];
@@ -93,11 +93,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const typeLabel =
+    shop.business_type === "freelance"
+      ? "Freelance & Consulting"
+      : shop.business_type === "staffing"
+      ? "HR & Staffing"
+      : shop.business_type === "hybrid"
+      ? "Services & Goods"
+      : "Retail & Goods";
+
   return (
     <div className="mx-auto min-h-dvh max-w-6xl lg:grid lg:grid-cols-[220px_1fr]">
       <aside className="hidden border-r border-[var(--line)] px-4 py-6 lg:block">
         <p className="font-display text-3xl">Hisaab</p>
-        <p className="mt-1 text-sm muted">{shop.business_name}</p>
+        <p className="mt-1 text-sm font-semibold">{shop.business_name}</p>
+        <p className="text-xs muted">{typeLabel}</p>
         <nav className="mt-8 grid gap-2">
           {LINKS.map((link) => (
             <Link key={link.href} href={link.href} aria-current={pathname === link.href ? "page" : undefined} className="nav-link rounded-2xl px-3 py-3 font-semibold">
@@ -115,7 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div>
         <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-3 backdrop-blur">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.16em] muted">Hisaab</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] muted">Hisaab · {typeLabel}</p>
             <p className="font-semibold leading-tight">{shop.business_name}</p>
           </div>
           <HeaderActions>

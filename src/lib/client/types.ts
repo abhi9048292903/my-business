@@ -7,6 +7,7 @@ export type Shop = {
   address: string | null;
   webhook_secret: string;
   printer_width: string;
+  business_type?: string;
 };
 
 export type CatalogItem = {
@@ -20,6 +21,10 @@ export type CatalogItem = {
   gst_rate: number;
   stock_qty: number;
   low_stock_qty: number;
+  track_stock?: number;
+  item_type?: "product" | "service";
+  skills?: string | null;
+  service_type?: string | null;
 };
 
 export type Category = { id: string; name: string };
